@@ -1,9 +1,9 @@
-# FHIR Information Gateway
+# cleaner
 
 <!-- Build status of the main branch -->
 
 [![Build Status](https://storage.googleapis.com/fhir-proxy-build-badges/build.svg)](https://storage.googleapis.com/fhir-proxy-build-badges/build.html)
-[![codecov](https://codecov.io/gh/google/fhir-gateway/branch/main/graph/badge.svg)](https://app.codecov.io/gh/google/fhir-gateway/tree/main)
+[![codecov](https://codecov.io/gh/google/cleaner/branch/main/graph/badge.svg)](https://app.codecov.io/gh/google/cleaner/tree/main)
 
 FHIR Information Gateway is a simple access-control proxy that sits in front of
 a [FHIR](https://www.hl7.org/fhir/) store (e.g., a
@@ -57,7 +57,7 @@ java -Dloader.path="PATH-TO-ADDITIONAL-PLUGINGS/custom-plugins.jar" \
 
 The plugin library can be swapped with any third party access-checker as
 described in the [plugins](plugins) directory and
-[the wiki](https://github.com/google/fhir-gateway/wiki/Understanding-access-checker-plugins).
+[the wiki](https://github.com/google/cleaner/wiki/Understanding-access-checker-plugins).
 
 Note: Spring Boot is not a requirement for using FHIR Information Gateway; we
 just use it to simplify the
@@ -103,19 +103,19 @@ The configuration parameters are provided through environment variables:
   ```
 
   For more information on how access-checkers work and building your own, see
-  [Understanding access checker plugins](https://github.com/google/fhir-gateway/wiki/Understanding-access-checker-plugins).
+  [Understanding access checker plugins](https://github.com/google/cleaner/wiki/Understanding-access-checker-plugins).
 
 - `ALLOWED_QUERIES_FILE`: A list of URL requests that should bypass the access
   checker and always be allowed.
-  [`AllowedQueriesChecker`](https://github.com/google/fhir-gateway/blob/main/server/src/main/java/com/google/fhir/gateway/AllowedQueriesChecker.java)
+  [`AllowedQueriesChecker`](https://github.com/google/cleaner/blob/main/server/src/main/java/com/google/fhir/gateway/AllowedQueriesChecker.java)
   compares the incoming request with a configured set of allowed-queries. The
   intended use of this checker is to override all other access-checkers for
   certain user-defined criteria. The user defines their criteria in a config
   file and if the URL query matches an entry in the config file, access is
   granted.
-  [AllowedQueriesConfig](https://github.com/google/fhir-gateway/blob/main/server/src/main/java/com/google/fhir/gateway/AllowedQueriesConfig.java)
+  [AllowedQueriesConfig](https://github.com/google/cleaner/blob/main/server/src/main/java/com/google/fhir/gateway/AllowedQueriesConfig.java)
   provides all the supported configurations. An example of this is
-  [`hapi_page_url_allowed_queries.json`](https://github.com/google/fhir-gateway/blob/main/resources/hapi_page_url_allowed_queries.json).
+  [`hapi_page_url_allowed_queries.json`](https://github.com/google/cleaner/blob/main/resources/hapi_page_url_allowed_queries.json).
   To use this file with `ALLOWED_QUERIES_FILE`:
 
   ```shell
@@ -168,14 +168,14 @@ The proxy is also available as a [docker image](Dockerfile):
 ```shell
 $ docker run -p 8081:8080 -e TOKEN_ISSUER=[token_issuer_url] \
   -e PROXY_TO=[fhir_server_url] -e ACCESS_CHECKER=list \
-  us-docker.pkg.dev/fhir-proxy-build/stable/fhir-gateway:latest
+  us-docker.pkg.dev/fhir-proxy-build/stable/cleaner:latest
 ```
 
 Note if the `TOKEN_ISSUER` is on the `localhost` you may need to bypass proxy's
 token issuer check by setting `RUN_MODE=DEV` environment variable if you are
 accessing the proxy from an Android emulator, which runs on a separate network.
 
-[Try the proxy with test servers in Docker](https://github.com/google/fhir-gateway/wiki/Try-out-FHIR-Information-Gateway).
+[Try the proxy with test servers in Docker](https://github.com/google/cleaner/wiki/Try-out-FHIR-Information-Gateway).
 
 GCP note: if this is not on a VM with proper service account (e.g., on a local
 host), you need to pass GCP credentials to it, for example by mapping the
