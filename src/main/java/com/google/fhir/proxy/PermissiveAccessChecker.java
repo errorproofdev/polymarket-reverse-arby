@@ -21,8 +21,8 @@ import com.auth0.jwt.interfaces.DecodedJWT;
 /** This is the default no-op access-checker which lets all requests to go through. */
 public class PermissiveAccessChecker implements AccessChecker {
   @Override
-  public boolean canAccess(RequestDetails requestDetails) {
-    return true;
+  public AccessDecision checkAccess(RequestDetails requestDetails) {
+    return new NoOpAccessDecision(true);
   }
 
   public static class Factory implements AccessCheckerFactory {
