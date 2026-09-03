@@ -1,227 +1,271 @@
-# cleaner
+![](logo.png)
 
-<!-- Build status of the main branch -->
+# Polymarket Arbitrage Reverse Bot
 
-[![Build Status](https://storage.googleapis.com/fhir-proxy-build-badges/build.svg)](https://storage.googleapis.com/fhir-proxy-build-badges/build.html)
-[![codecov](https://codecov.io/gh/google/cleaner/branch/main/graph/badge.svg)](https://app.codecov.io/gh/google/cleaner/tree/main)
+TypeScript automation for my Polymarket reverse strategy on **15-minute BTC/ETH Up or Down** markets.
 
-FHIR Information Gateway is a simple access-control proxy that sits in front of
-a [FHIR](https://www.hl7.org/fhir/) store (e.g., a
-[HAPI FHIR](https://hapifhir.io/) server,
-[GCP FHIR store](https://cloud.google.com/healthcare-api/docs/concepts/fhir),
-etc.) and controls access to FHIR resources.
+---
 
-Note: "gateway" and "proxy" are used interchangably here, as the gateway is
-implemented as a proxy server.
+## My Polymarket account
+<img width="815" height="291" alt="image" src="https://github.com/user-attachments/assets/0971eb6d-de7e-4f9a-82a1-14a2163db209" />
 
-The authorization and access-control have three components; one of them is this
-access proxy. The other two are an Identity Provider (IDP) and an Authorization
-server (AuthZ). The responsibility of this pair is to authenticate the user and
-issue access tokens (in JWT format and using authorization flow of OAuth 2.0).
-The requests to the access proxy should have the access token as a Bearer
-Authorization header. Based on that, the proxy decides whether to grant access
-for a FHIR query.
 
-<img src="doc/docs/summary.png" width=50% alt="Modules involved in FHIR authorization/access-control">
+| | |
+|---|---|
+| **Profile** | [@odahoa](https://polymarket.com/@odahoa?tab=activity) |
+| **Username** | `odahoa` |
+| **Proxy wallet** | `0xe2511c9e41c5e762887e538b1d6e7221807aa237` |
+| **Markets** | `btc-updown-15m`, `eth-updown-15m` |
 
-For more information on the technical design,
-[see the design doc](doc/docs/design.md).
+All activity, positions, and PnL live on my profile:  
+**https://polymarket.com/@odahoa?tab=activity**
 
-# Modules
+This bot trades **from that account** — it automates what I already do manually. It is not copy trading and does not watch any other wallet.
 
-The proxy consists of a core, which is in the [server](server) module, and a set
-of _access-checker_ plugins, which can be implemented by third parties and added
-to the proxy server. Two sample plugins are implemented in the
-[plugins](plugins) module. There is also a sample `exec` module which shows how
-all pieces can be woven together into a single Spring Boot app. To build all
-modules, from the root run:
+---
 
-```shell
-mvn package -Dspotless.apply.skip=true
+## Overview
+
+Polymarket runs 15-minute windows like:
+
+> **Bitcoin Up or Down — 1:45PM–2:00PM ET**
+
+Each window has two tokens:
+
+| Token | Wins when |
+|-------|-----------|
+| **Up** | Price at end ≥ price at start |
+| **Down** | Price at end < price at start |
+
+Winning tokens pay **$1.00**. Losing tokens pay **$0.00**.
+
+My strategy — the **reverse bot** — posts limit **BUY** orders on **both sides** every window:
+
+1. **Cheap reversal side (7–10¢)** on the underdog outcome  
+2. **Expensive hedge side (90–95¢)** on the favorite outcome  
+
+That is the same pattern visible on my [activity tab](https://polymarket.com/@odahoa?tab=activity): round limit prices (7¢, 8¢, 10¢ … 95¢), 20–90 shares per fill, no sells — hold to resolution.
+
+---
+
+## Why "reverse"?
+
+Early in a window, price often trends one way:
+
+```
+BTC pumps in first 10 minutes
+  → Up token   ~90–97¢  (favorite)
+  → Down token ~3–10¢   (underdog)
 ```
 
-The server and the plugins can be run together through this executable jar (
-`--server.port` is just one of the many default Spring Boot flags):
+The crowd prices the underdog as nearly dead. The **reverse bet** is: *it flips before the window closes*.
 
-```shell
-java -jar exec/target/exec-0.1.0.jar --server.port=8081
+| Leg | Outcome | Entry | If it wins |
+|-----|---------|-------|------------|
+| **Reverse** | Underdog | 7–10¢ | ~10–14× |
+| **Hedge** | Favorite | 90–95¢ | ~5–11% |
+
+Only one side pays $1 per window. I run both legs because:
+
+- Cheap fills are rare but pay huge when they hit.
+- Hedge fills are smaller profit but hit more often.
+- Over hundreds of windows, a few reversals cover many losses.
+
+---
+
+## How I trade (manual → bot)
+
+From my account history:
+
+| Pattern | Detail |
+|---------|--------|
+| Markets | BTC & ETH 15m Up/Down only |
+| Order type | Limit BUY only — never sell |
+| Cheap leg | Fills at 7–10¢ (sometimes 5–25¢) on underdog |
+| Hedge leg | Fills at 90–95¢ on favorite |
+| Both sides | Same window — e.g. Down @ 95¢ and Up @ 15¢ |
+| Size | 20–90 shares per order |
+
+The bot replaces hand-placing every limit order each window.
+
+---
+
+## Bot logic
+
+Every **5 seconds** (configurable):
+
+```
+1. Scan active btc-updown-15m / eth-updown-15m markets
+2. Load Up & Down order books (CLOB API)
+3. Underdog  = outcome with lower best ask
+4. Favorite  = the other outcome
+5. Post limit BUYs on underdog  @ 7¢, 8¢, 9¢, 10¢
+6. Post limit BUYs on favorite  @ 90¢–95¢  (if hedge enabled)
+7. Skip price levels already posted this session
 ```
 
-Note that extra access-checker plugins can be added through the `loader.path`
-property (although it is probably easier to build them into your server):
+### Cheap leg — underdog @ 7–10¢
 
-```shell
-java -Dloader.path="PATH-TO-ADDITIONAL-PLUGINGS/custom-plugins.jar" \
-  -jar exec/target/exec-0.1.0.jar --server.port=8081
+```
+Down best ask = 4¢  →  bot bids 7¢, 8¢, 9¢, 10¢ on Down
 ```
 
-The plugin library can be swapped with any third party access-checker as
-described in the [plugins](plugins) directory and
-[the wiki](https://github.com/google/cleaner/wiki/Understanding-access-checker-plugins).
+If Down reverses and wins:
 
-Note: Spring Boot is not a requirement for using FHIR Information Gateway; we
-just use it to simplify the
-[MainApp](exec/src/main/java/com/google/fhir/gateway/MainApp.java). The only
-Spring-related requirement is to do a
-[@ComponentScan](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/context/annotation/ComponentScan.html)
-to find all access-checker plugins in the classpath.
-
-# Configuration parameters
-
-The configuration parameters are provided through environment variables:
-
-- `PROXY_TO`: The base url of the FHIR store e.g.:
-
-  ```shell
-  export PROXY_TO=https://example.com/fhir
-  ```
-
-- `TOKEN_ISSUER`: The URL of the access token issuer, e.g.:
-
-  ```shell
-  export TOKEN_ISSUER=http://localhost:9080/auth/realms/test
-  ```
-
-  The above example is based on the default config of a test IDP+AuthZ
-  [Keycloak](https://github.com/Alvearie/keycloak-extensions-for-fhir) server.
-  To see how this server is configured, check the
-  [docker/keycloak](docker/keycloak) directory. If you want to use a
-  SMART-on-FHIR app use this realm instead:
-
-  ```shell
-  export TOKEN_ISSUER=http://localhost:9080/auth/realms/test-smart
-  ```
-
-- `ACCESS_CHECKER`: The access-checker to use. Each access-checker has a name
-  (see [plugins](plugins) for details) and this variable should be set to the
-  name of the plugin to use. For example, to use one of the sample plugins
-  include one of:
-
-  ```shell
-  export ACCESS_CHECKER=list
-  export ACCESS_CHECKER=patient
-  ```
-
-  For more information on how access-checkers work and building your own, see
-  [Understanding access checker plugins](https://github.com/google/cleaner/wiki/Understanding-access-checker-plugins).
-
-- `ALLOWED_QUERIES_FILE`: A list of URL requests that should bypass the access
-  checker and always be allowed.
-  [`AllowedQueriesChecker`](https://github.com/google/cleaner/blob/main/server/src/main/java/com/google/fhir/gateway/AllowedQueriesChecker.java)
-  compares the incoming request with a configured set of allowed-queries. The
-  intended use of this checker is to override all other access-checkers for
-  certain user-defined criteria. The user defines their criteria in a config
-  file and if the URL query matches an entry in the config file, access is
-  granted.
-  [AllowedQueriesConfig](https://github.com/google/cleaner/blob/main/server/src/main/java/com/google/fhir/gateway/AllowedQueriesConfig.java)
-  provides all the supported configurations. An example of this is
-  [`hapi_page_url_allowed_queries.json`](https://github.com/google/cleaner/blob/main/resources/hapi_page_url_allowed_queries.json).
-  To use this file with `ALLOWED_QUERIES_FILE`:
-
-  ```shell
-  export ALLOWED_QUERIES_FILE="resources/hapi_page_url_allowed_queries.json"
-  ```
-
-- `BACKEND_TYPE`: The type of backend, either `HAPI` or `GCP`. `HAPI` should be
-  used for most FHIR servers, while `GCP` should be used for GCP FHIR stores.
-
-- `AUDIT_EVENT_LOGGING_ENABLED`: A flag to configure AuditEvent logging. Set to
-  `true` to enable or `false` to disable. Default when not set is `false`.
-
-## Gateway to server access
-
-The proxy must be able to send FHIR queries to the FHIR server. The FHIR server
-must be configured to accept connections from the proxy while rejecting most
-other requests.
-
-If you use a
-[GCP FHIR store](https://cloud.google.com/healthcare-api/docs/concepts/fhir) you
-have the following options:
-
-- If you have access to the FHIR store, you can use your own credentials by
-  doing
-  [application-default login](https://cloud.google.com/sdk/gcloud/reference/auth/application-default/login).
-  This is useful when testing the proxy on your local machine, and you have
-  access to the FHIR server through your credentials.
-- Use a service account with required access (e.g., "Healthcare FHIR Resource
-  Reader", "Healthcare Dataset Viewer", "Healthcare FHIR Store Viewer"). You can
-  then run the proxy in the same GCP project on a VM with this service account.
-- [not-recommended] You can create and download a key file for the above service
-  account, then use it with
-  ```shell
-  export GOOGLE_APPLICATION_CREDENTIALS="PATH_TO_THE_JSON_KEY_FILE"
-  ```
-
-Once you have set all the above, you can run the proxy server. The sample `exec`
-module uses [Apache Tomcat](https://tomcat.apache.org/) through
-[Spring Boot](https://spring.io/projects/spring-boot) and the usual
-configuration parameters apply, e.g., to run on port 8081:
-
-```shell
-java -jar exec/target/exec-0.1.0.jar --server.port=8081
+```
+90 shares × 8¢  =  $7.20 in
+90 shares × $1  =  $90.00 out   →  +$82.80 (~1,150%)
 ```
 
-## Docker
+### Hedge leg — favorite @ 90–95¢
 
-The proxy is also available as a [docker image](Dockerfile):
-
-```shell
-$ docker run -p 8081:8080 -e TOKEN_ISSUER=[token_issuer_url] \
-  -e PROXY_TO=[fhir_server_url] -e ACCESS_CHECKER=list \
-  us-docker.pkg.dev/fhir-proxy-build/stable/cleaner:latest
+```
+Up best ask = 97¢  →  bot bids 90¢–95¢ on Up
 ```
 
-Note if the `TOKEN_ISSUER` is on the `localhost` you may need to bypass proxy's
-token issuer check by setting `RUN_MODE=DEV` environment variable if you are
-accessing the proxy from an Android emulator, which runs on a separate network.
+If Up holds and wins:
 
-[Try the proxy with test servers in Docker](https://github.com/google/cleaner/wiki/Try-out-FHIR-Information-Gateway).
-
-GCP note: if this is not on a VM with proper service account (e.g., on a local
-host), you need to pass GCP credentials to it, for example by mapping the
-`.config/gcloud` volume (i.e., add `-v ~/.config/gcloud:/root/.config/gcloud` to
-the docker command).
-
-# How to use this proxy
-
-Once the proxy is running, we first need to fetch an access token from the
-`TOKEN_ISSUER`; you need the test `username` and `password` plus the
-`client_id`:
-
-```shell
-$ curl -X POST -d 'client_id=CLIENT_ID' -d 'username=testuser' \
-  -d 'password=testpass' -d 'grant_type=password' \
-"http://localhost:9080/auth/realms/test/protocol/openid-connect/token"
+```
+52 shares × 95¢  =  $49.40 in
+52 shares × $1   =  $52.00 out  →  +$2.60 (~5%)
 ```
 
-We need the `access_token` of the returned JSON to be able to convince the proxy
-to authorize our FHIR requests (there is also a `refresh_token` in the above
-response). Assuming this is stored in the `ACCESS_TOKEN` environment variable,
-we can access the FHIR store:
+---
 
-```shell
-$ curl -X GET -H "Authorization: Bearer ${ACCESS_TOKEN}" \
--H "Content-Type: application/json; charset=utf-8" \
-'http://localhost:8081/Patient/f16b5191-af47-4c5a-b9ca-71e0a4365824'
+## Example window
+
+**Market:** Bitcoin Up or Down — 1:45–2:00 PM ET  
+**BTC pumped early** → Up favored, Down cheap
+
+| Token | Book | Bot posts |
+|-------|------|-----------|
+| Up (favorite) | ask 97¢ | BUY limits @ 90–95¢ |
+| Down (underdog) | ask 4¢ | BUY limits @ 7–10¢ |
+
+| Result | Cheap leg | Hedge leg |
+|--------|-----------|-----------|
+| Up wins | Down → $0 | Up → small profit |
+| Down reverses | Down → big profit | Up → $0 |
+
+---
+
+## Return table
+
+| Buy price | Payout | Return if win |
+|-----------|--------|---------------|
+| 7¢ | $1.00 | +1,329% |
+| 8¢ | $1.00 | +1,150% |
+| 9¢ | $1.00 | +1,011% |
+| 10¢ | $1.00 | +900% |
+| 95¢ | $1.00 | +5% |
+
+Most 7–10¢ bets go to zero. Edge comes from occasional reversals at high multiples.
+
+---
+
+## Quick start
+
+```bash
+git clone https://github.com/Pineconox1/polymarket-arbitrage-reverse-bot
+cd polymarket-arbitrage-reverse-bot
+npm install
+cp .env.example .env
+npm start          # dry-run: logs orders, no submission
 ```
 
-```shell
-$ curl -X PUT -H "Authorization: Bearer ${ACCESS_TOKEN}" \
--H "Content-Type: application/json; charset=utf-8" \
-'http://localhost:8081/Patient/f16b5191-af47-4c5a-b9ca-71e0a4365824' \
--d @Patient_f16b5191-af47-4c5a-b9ca-71e0a4365824_modified.json
+### Go live on @odahoa
+
+```env
+DRY_RUN=false
+PRIVATE_KEY=0x...                                           # account signing key
+FUNDER_ADDRESS=0xe2511c9e41c5e762887e538b1d6e7221807aa237   # @odahoa proxy wallet
+SIGNATURE_TYPE=2
 ```
 
-Of course, whether a query is accepted or denied, depends on the access-checker
-used and the `ACCESS_TOKEN` claims. For example, for `ACCESS_CHECKER=list` there
-should be a `patient_list` claim which is the ID of a `List` FHIR resource with
-all the patients that this user has access to. For `ACCESS_CHECKER=patient`,
-there should be a `patient_id` claim with a valid Patient resource ID.
+| `SIGNATURE_TYPE` | Use for |
+|------------------|---------|
+| `0` | EOA / MetaMask |
+| `2` | Gnosis Safe proxy *(typical Polymarket account)* |
+| `3` | POLY_1271 deposit wallet |
 
-# Acknowledgement
+---
 
-This proxy is implemented as a
-[HAPI FHIR Plain Server](https://hapifhir.io/hapi-fhir/docs/server_plain/introduction.html),
-starting from this
-[hapi-fhirstarters-simple-server](https://github.com/FirelyTeam/fhirstarters/tree/master/java/hapi-fhirstarters-simple-server)
-example.
+## Config
+
+### Strategy
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CHEAP_BUY_MIN` | `0.07` | Low end of reversal bids |
+| `CHEAP_BUY_MAX` | `0.10` | High end of reversal bids |
+| `CHEAP_ORDER_USDC` | `10` | USDC per cheap limit order |
+| `ENABLE_EXPENSIVE_HEDGE` | `true` | Post 90–95¢ favorite bids |
+| `EXPENSIVE_BUY_MIN` | `0.90` | Low end of hedge bids |
+| `EXPENSIVE_BUY_MAX` | `0.95` | High end of hedge bids |
+| `EXPENSIVE_ORDER_USDC` | `50` | USDC per hedge limit order |
+| `MAX_SHARES_PER_ORDER` | `90` | Max shares per order |
+
+### Markets & timing
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MARKET_SLUG_PREFIXES` | `btc-updown-15m,eth-updown-15m` | Markets to scan |
+| `POLL_INTERVAL_MS` | `5000` | Scan interval |
+| `MINUTES_BEFORE_CLOSE_MIN` | `0` | Start trading N min into window |
+| `MINUTES_BEFORE_CLOSE_MAX` | `15` | Stop trading N min before close |
+
+Trade only late window (when cheap tokens show up):
+
+```env
+MINUTES_BEFORE_CLOSE_MIN=3
+MINUTES_BEFORE_CLOSE_MAX=12
+```
+
+### Safety
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DRY_RUN` | `true` | Log only — no real orders |
+
+---
+
+## Project layout
+
+```
+reverse-bot/
+├── src/
+│   ├── index.ts           # main loop
+│   ├── market-scanner.ts  # active 15m markets + books
+│   ├── strategy.ts        # underdog/favorite + limit prices
+│   ├── trader.ts          # CLOB order submission
+│   └── config.ts
+├── .env.example
+└── package.json
+```
+
+---
+
+## Commands
+
+```bash
+npm start      # run bot
+npm run dev    # run with hot reload
+npm run build  # compile TypeScript
+```
+
+---
+
+## Risks
+
+- **Most cheap bids lose.** 7–10¢ tokens frequently expire worthless.
+- **Limits may not fill.** Bidding 7¢ when ask is 4¢ waits for sellers.
+- **Both legs can't both win.** One side always goes to $0.
+- **Real money.** Test with `DRY_RUN=true` first.
+
+---
+
+## Links
+
+- My profile: https://polymarket.com/@odahoa  
+- My activity: https://polymarket.com/@odahoa?tab=activity  
+- Polymarket settings: https://polymarket.com/settings  
